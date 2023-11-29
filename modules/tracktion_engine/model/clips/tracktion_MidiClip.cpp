@@ -102,6 +102,8 @@ MidiClip::MidiClip (const juce::ValueTree& v, EditItemID id, ClipOwner& targetPa
     loopLengthBeats.referTo (state, IDs::loopLengthBeats, um, BeatDuration());
     originalLength.referTo (state, IDs::originalLength, um, BeatDuration());
 
+    useClipLaunchQuantisation.referTo (state, IDs::useClipLaunchQuantisation, um);
+
     proxyAllowed.referTo (state, IDs::proxyAllowed, um, true);
     currentTake.referTo (state, IDs::currentTake, um);
 
@@ -383,6 +385,23 @@ void MidiClip::setQuantisation (const QuantisationType& newType)
 {
     if (newType.getType (false) != quantisation->getType (false))
         *quantisation = newType;
+}
+
+//==============================================================================
+std::shared_ptr<LaunchHandle> MidiClip::getLaunchHandle()
+{
+    if (! launchHandle)
+        launchHandle = std::make_shared<LaunchHandle>();
+
+    return launchHandle;
+}
+
+LaunchQuantisation* MidiClip::getLaunchQuantisation()
+{
+    if (! launchQuantisation)
+        launchQuantisation = std::make_unique<LaunchQuantisation> (state, edit);
+
+    return launchQuantisation.get();
 }
 
 //==============================================================================
@@ -779,6 +798,10 @@ void MidiClip::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Iden
 
             clearCachedLoopSequence();
         }
+        else if (id == IDs::launchQuantisation || id == IDs::useClipLaunchQuantisation)
+        {
+            changed();
+        }
         else
         {
             if (id == IDs::length || id == IDs::offset)
@@ -860,6 +883,27 @@ void MidiClip::pitchTempoTrackChanged()
 
     // for the midi editor to redraw
     state.sendPropertyChangeMessage (IDs::mute);
+}
+
+//==============================================================================
+//==============================================================================
+void mergeInMidiSequence (MidiClip& mc, juce::MidiMessageSequence ms, TimeDuration startTime,
+                          MidiList::NoteAutomationType automationType)
+{
+    ms.addTimeToMessages (startTime.inSeconds());
+
+    const auto start = TimePosition::fromSeconds (ms.getStartTime());
+    const auto end = TimePosition::fromSeconds (ms.getEndTime());
+
+    auto pos = mc.getPosition();
+
+    if (pos.getStart() > start)
+        mc.extendStart (std::max (0_tp, start - 0.1s));
+
+    if (pos.getEnd() < end)
+        mc.setEnd (end + 0.1s, true);
+
+    mc.mergeInMidiSequence (ms, automationType);
 }
 
 }} // namespace tracktion { inline namespace engine

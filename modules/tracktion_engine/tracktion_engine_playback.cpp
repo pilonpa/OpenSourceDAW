@@ -10,6 +10,9 @@
 
 #if ! JUCE_PROJUCER_LIVE_BUILD
 
+#include "3rd_party/magic_enum/tracktion_magic_enum.hpp"
+
+#include <shared_mutex>
 
 #if TRACKTION_ENABLE_ABLETON_LINK
  #include <juce_core/system/juce_TargetPlatform.h>
@@ -49,8 +52,10 @@
       #include <ifaddrs.h>
      #endif
 
+    #include "../3rd_party/choc/platform/choc_DisableAllWarnings.h"
      #include <ableton/Link.hpp>
      #include <ableton/link/HostTimeFilter.hpp>
+    #include "../3rd_party/choc/platform/choc_ReenableAllWarnings.h"
 
      #if JUCE_ANDROID
       #include <ifaddrs.cpp>
@@ -254,6 +259,9 @@ using namespace std::literals;
 
 #include "playback/graph/tracktion_SharedLevelMeasuringNode.h"
 #include "playback/graph/tracktion_SharedLevelMeasuringNode.cpp"
+
+#include "playback/graph/tracktion_SlotControlNode.h"
+#include "playback/graph/tracktion_SlotControlNode.cpp"
 
 #include "playback/graph/tracktion_SpeedRampWaveNode.h"
 #include "playback/graph/tracktion_SpeedRampWaveNode.cpp"

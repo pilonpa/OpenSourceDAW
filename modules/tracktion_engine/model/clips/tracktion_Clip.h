@@ -75,7 +75,7 @@ public:
         You would usually create a clip using ClipOwner::insertNewClip
     */
     Clip (const juce::ValueTree&, ClipOwner&, EditItemID, Type);
-    
+
     /** Destructor. */
     ~Clip() override;
 
@@ -140,6 +140,31 @@ public:
 
     /** Should be implemented to change the underlying source to a new ProjectItemID. */
     void reassignReferencedItem (const ReferencedItem&, ProjectItemID /*newID*/, double /*newStartTime*/) override {}
+
+    //==============================================================================
+    /** Some clip types can be launched, if that's possible, this returns a handle to
+        trigger starting/stopping the clip.
+    */
+    virtual std::shared_ptr<LaunchHandle> getLaunchHandle()     { return {}; }
+
+    /** Some clip types can be launched, if that's possible, this sets whether the
+        clip's quantisation or the global quantisation should be used.
+        @see getLaunchQuantisation, Edit::getLaunchQuantisation
+    */
+    virtual void setUsesGlobalLaunchQuatisation (bool)          {}
+
+    /** Some clip types can be launched, if that's possible, this returns whether the
+        clip's quantisation or the global quantisation should be used.
+        @see getLaunchQuantisation, Edit::getLaunchQuantisation
+    */
+    virtual bool usesGlobalLaunchQuatisation()                  { return true; }
+
+    /** Some clip types can be launched, if that's possible, this returns a quantisation
+        that can be used for this clip.
+        N.B. This will always be the clip's LaunchQuantisation, to find out if you should use the Edit's
+        LaunchQuantisation, check usesGlobalLaunchQuatisation first
+    */
+    virtual LaunchQuantisation* getLaunchQuantisation()         { return {}; }
 
     //==============================================================================
     /** Returns the ClipPosition on the parent Track. */
@@ -251,7 +276,7 @@ public:
     //==============================================================================
     /** Returns the speed ratio i.e. how quickly the clip plays back. */
     double getSpeedRatio() const noexcept           { return speedRatio; }
-    
+
     /** Sets a speed ratio i.e. how quickly the clip plays back. */
     virtual void setSpeedRatio (double);
 
@@ -288,6 +313,8 @@ public:
     ClipTrack* getClipTrack() const;
     /** Returns the parent Track this clip is on (if any). */
     Track* getTrack() const override;
+    /** Returns the parent ClipSlot this clip is on (if any). */
+    ClipSlot* getClipSlot() const;
 
     //==============================================================================
     /** Returns the colour property of this clip. */
@@ -338,7 +365,7 @@ public:
     virtual void setShowingTakes (bool shouldShow)          { showingTakes = shouldShow; }
     /** Returns true if the clip is showing takes. */
     virtual bool isShowingTakes() const                     { return showingTakes;  }
-    
+
     /** Attempts to unpack the takes to new clips.
         @param toNewTracks  If true this will create new tracks for the new clips,
                             otherwise they'll be placed on existing tracks

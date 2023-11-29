@@ -55,7 +55,7 @@ public:
     AudioFileCacheReader (AudioFileCache::Reader::Ptr ptr, TimeDuration timeout,
                           const juce::AudioChannelSet& destBufferChannels,
                           const juce::AudioChannelSet& sourceBufferChannels)
-        : reader (ptr), timeoutMs ((int) std::lround (timeout.inSeconds() * 1000.0)),
+        : reader (std::move (ptr)), timeoutMs ((int) std::lround (timeout.inSeconds() * 1000.0)),
           destChannelSet (destBufferChannels), sourceChannelSet (sourceBufferChannels)
     {
     }
@@ -337,7 +337,7 @@ public:
                     case ResamplingQuality::sincBest:   return src::SRC_SINC_BEST_QUALITY;
                     case ResamplingQuality::lagrange:   [[ fallthrough ]];
                     default: assert (false); return src::SRC_SINC_FASTEST;
-                };
+                }
             }();
 
         int error = 0;
@@ -690,7 +690,7 @@ public:
     WarpReader (std::unique_ptr<AudioReader> input,
                 WarpMap warpMap)
         : SingleInputAudioReader (std::make_unique<TimeStretchReader> (std::move (input))),
-          reader (static_cast<TimeStretchReader*> (source.get())), map (warpMap)
+          reader (static_cast<TimeStretchReader*> (source.get())), map (std::move (warpMap))
     {
     }
 
@@ -956,9 +956,9 @@ public:
                double playbackSpeedRatio)
     {
         // Apply offset first
-        br = br + offset - *dynamicOffset;
+        const auto beatRangeToRead = br + offset - *dynamicOffset;
 
-        return readLoopedBeatRange (br, destBuffer, editDuration, isContiguous, playbackSpeedRatio);
+        return readLoopedBeatRange (beatRangeToRead, destBuffer, editDuration, isContiguous, playbackSpeedRatio);
     }
 
     choc::buffer::ChannelCount getNumChannels() override    { return source->getNumChannels(); }
@@ -1492,7 +1492,7 @@ void WaveNode::processSection (ProcessContext& pc, juce::Range<int64_t> timeline
 
             if (state.lastSample == 0.0)
                 continue;
-            
+
             const auto dest = destBuffer.getIterator (channel).sample;
 
             for (uint32_t i = 0; i < lastSampleFadeLength; ++i)

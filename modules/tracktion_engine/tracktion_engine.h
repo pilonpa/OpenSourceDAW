@@ -46,6 +46,7 @@
 #include <random>
 #include <optional>
 #include <variant>
+#include <any>
 
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_audio_utils/juce_audio_utils.h>
@@ -64,6 +65,8 @@
  #include "../3rd_party/choc/containers/choc_SingleReaderSingleWriterFIFO.h"
  #include "../3rd_party/choc/containers/choc_NonAllocatingStableSort.h"
 #endif
+
+ #include "../3rd_party/expected/expected.hpp"
 
 #undef __TEXT
 
@@ -146,7 +149,7 @@
     Enables time-stretching with the RubberBand library.
     You must have RubberBand in your search path if you enable this.
     @see TRACKTION_BUILD_RUBBERBAND
-    
+
     N.B. RubberBand is not owned by Tracktion and is licensed separately.
     Please make sure you have a suitable licence if building with RubberBand
     support. You can find more information here: https://breakfastquay.com/rubberband/
@@ -162,7 +165,7 @@
     less optimised version on some platforms as RubberBand can be configured
     with IPP on Windows etc.
     You must have RubberBand in your search path if you enable this.
-    
+
     N.B. RubberBand is not owned by Tracktion and is licensed separately.
     Please make sure you have a suitable licence if building with RubberBand
     support. You can find more information here: https://breakfastquay.com/rubberband/
@@ -372,6 +375,11 @@ namespace tracktion { inline namespace engine
     class PropertyStorage;
     class TrackOutput;
     class BufferedFileReader;
+    class ClipSlotList;
+    class ClipSlot;
+    class Scene;
+    class LaunchHandle;
+    class LaunchQuantisation;
 }} // namespace tracktion { inline namespace engine
 
 #ifdef __GNUC__
@@ -402,9 +410,11 @@ namespace tracktion { inline namespace engine
 #include "utilities/tracktion_BackgroundJobs.h"
 #include "utilities/tracktion_MiscUtilities.h"
 #include "utilities/tracktion_TemporaryFileManager.h"
+#include "utilities/tracktion_Types.h"
 #include "utilities/tracktion_PluginComponent.h"
 #include "utilities/tracktion_BinaryData.h"
 #include "utilities/tracktion_SettingID.h"
+#include "utilities/tracktion_ScopedListener.h"
 #include "utilities/tracktion_MouseHoverDetector.h"
 #include "utilities/tracktion_CurveEditor.h"
 #include "utilities/tracktion_Envelope.h"
@@ -473,10 +483,12 @@ namespace tracktion { inline namespace engine
 #include "plugins/internal/tracktion_AuxSend.h"
 #include "plugins/effects/tracktion_Equaliser.h"
 
+#include "model/clips/tracktion_LaunchHandle.h"
 #include "model/edit/tracktion_EditSnapshot.h"
 #include "model/edit/tracktion_EditInsertPoint.h"
 #include "model/tracks/tracktion_TrackItem.h"
 #include "model/tracks/tracktion_Track.h"
+#include "model/edit/tracktion_Scene.h"
 #include "model/edit/tracktion_TimeSigSetting.h"
 #include "model/edit/tracktion_TempoSetting.h"
 #include "model/edit/tracktion_TempoSequence.h"
@@ -527,6 +539,7 @@ namespace tracktion { inline namespace engine
 
 #include "model/tracks/tracktion_TrackOutput.h"
 #include "model/clips/tracktion_ClipOwner.h"
+#include "model/tracks/tracktion_ClipSlot.h"
 #include "model/tracks/tracktion_ClipTrack.h"
 #include "model/tracks/tracktion_AudioTrack.h"
 
@@ -548,6 +561,7 @@ namespace tracktion { inline namespace engine
 #include "model/clips/tracktion_ClipEffects.h"
 #include "model/clips/tracktion_CollectionClip.h"
 #include "model/clips/tracktion_ContainerClip.h"
+#include "model/clips/tracktion_LauncherClipPlaybackHandle.h"
 #include "model/clips/tracktion_MarkerClip.h"
 #include "model/clips/tracktion_MidiClip.h"
 #include "model/clips/tracktion_ReverseRenderJob.h"
@@ -556,6 +570,7 @@ namespace tracktion { inline namespace engine
 #include "model/clips/tracktion_WaveAudioClip.h"
 
 #include "model/edit/tracktion_GrooveTemplate.h"
+#include "model/edit/tracktion_LaunchQuantisation.h"
 #include "model/edit/tracktion_MarkerManager.h"
 
 #include "model/clips/tracktion_EditClip.h"

@@ -46,7 +46,7 @@ public:
     VolumeAndPanPlugin* getVolumePlugin();
     LevelMeterPlugin* getLevelMeterPlugin();
     EqualiserPlugin* getEqualiserPlugin();
-    AuxSendPlugin* getAuxSendPlugin (int bus = -1) const; // -1 == any bus, first aux found
+    AuxSendPlugin* getAuxSendPlugin (int bus = -1, AuxPosition ap = AuxPosition::byBus) const; // -1 == any bus, first aux found
 
     //==============================================================================
     /** looks for a name for a midi note by trying all the plugins, and returning a
@@ -73,6 +73,10 @@ public:
         the plugins, and is the track going to an audio output */
     bool canPlayAudio() const;
     bool canPlayMidi() const;
+
+    //==============================================================================
+    /** Returns the ClipSlotList for this track. */
+    ClipSlotList& getClipSlotList();
 
     //==============================================================================
     bool isFrozen (FreezeType) const override;
@@ -125,7 +129,7 @@ public:
 
         @returns False if there's no existing clips in the places it needs them.
     */
-    bool mergeInMidiSequence (const juce::MidiMessageSequence&, TimePosition startTime,
+    bool mergeInMidiSequence (juce::MidiMessageSequence, TimePosition startTime,
                               MidiClip*, MidiList::NoteAutomationType);
 
     void playGuideNote (int note, MidiChannel midiChannel, int velocity,
@@ -173,12 +177,14 @@ public:
 
     /** Removes a Listener. */
     void removeListener (Listener*);
-    
+
     /** Returns the listener list so Nodes can manually call them. */
     juce::ListenerList<Listener>& getListeners()            { return listeners; }
 
 protected:
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
+    void valueTreeParentChanged (juce::ValueTree& v) override;
+
     bool isTrackAudible (bool areAnyTracksSolo) const override;
 
     void timerCallback() override   { turnOffGuideNotes(); }
@@ -217,6 +223,7 @@ private:
     AsyncFunctionCaller asyncCaller;
 
     juce::ListenerList<Listener> listeners;
+    std::unique_ptr<ClipSlotList> clipSlotList;
 
     //==============================================================================
     void freezeTrack();

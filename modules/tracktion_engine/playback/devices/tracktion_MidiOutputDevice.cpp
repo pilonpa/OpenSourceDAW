@@ -54,7 +54,7 @@ public:
         {
             auto len = blockEnd - blockStart;
 
-            blockStart = tc != nullptr ? tc->getCurrentPosition() : 0.0;
+            blockStart = tc != nullptr ? tc->getPosition().inSeconds() : 0.0;
             blockEnd = blockStart + len;
         }
 
@@ -266,7 +266,7 @@ MidiOutputDevice::MidiOutputDevice (Engine& e, const juce::String& deviceName, i
       deviceIndex (index)
 {
     enabled = true;
-	
+
     timecodeGenerator = std::make_unique<MidiTimecodeGenerator>();
     midiClockGenerator = std::make_unique<MidiClockGenerator>();
     programNameSet = getMidiProgramManager().getDefaultCustomName();
@@ -386,13 +386,16 @@ void MidiOutputDevice::setSendingMMC (bool b)
     sendingMMC = b;
 }
 
-bool MidiOutputDevice::isConnectedToExternalController() const
+void MidiOutputDevice::setExternalController (ExternalController* ec)
 {
-    for (auto* ec : engine.getExternalControllerManager().getControllers())
-        if (ec->isUsingMidiOutputDevice (this) && ec->isEnabled())
-            return true;
+    TRACKTION_LOG ("MIDI External controller assigned: " + getName());
+    externalController = ec;
+}
 
-    return false;
+void MidiOutputDevice::removeExternalController (ExternalController* ec)
+{
+    if (externalController == ec)
+        externalController = nullptr;
 }
 
 void MidiOutputDevice::loadProps()
@@ -481,6 +484,9 @@ void MidiOutputDevice::closeDevice()
 
 void MidiOutputDevice::sendNoteOffMessages()
 {
+    if (isConnectedToExternalController())
+        return;
+
     if (outputDevice != nullptr)
     {
         const juce::ScopedLock sl (noteOnLock);

@@ -194,7 +194,7 @@ struct Edit::TreeWatcher   : public juce::ValueTree::Listener
             else if (v.hasType (IDs::CHANNEL))
             {
                 if (i == IDs::pattern || i == IDs::channel
-                    || i == IDs::velocities || i == IDs::gates || i == IDs::probabilities 
+                    || i == IDs::velocities || i == IDs::gates || i == IDs::probabilities
                      || i == IDs::note || i == IDs::velocity || i == IDs::groove
                      || i == IDs::grooveStrength)
                     restart();
@@ -738,10 +738,11 @@ void Edit::initialise()
         t->cancelAnyPendingUpdates();
 
     initialiseControllerMappings();
-    TemporaryFileManager::purgeOrphanFreezeAndProxyFiles (*this);
 
     callBlocking ([this]
                   {
+                      TemporaryFileManager::purgeOrphanFreezeAndProxyFiles (*this);
+
                       // Must be set to false before curve updates
                       // but set inside here to give the message loop some time to dispatch async updates
                       isLoadInProgress = false;
@@ -1323,6 +1324,23 @@ void Edit::updateMuteSoloStatuses()
 
     if (ecm.isAttachedToEdit (this))
         ecm.updateMuteSoloLights (false);
+}
+
+//==============================================================================
+SceneList& Edit::getSceneList()
+{
+    if (! sceneList)
+        sceneList = std::make_unique<SceneList> (state.getOrCreateChildWithName (IDs::SCENES, &undoManager), *this);
+
+    return *sceneList;
+}
+
+LaunchQuantisation& Edit::getLaunchQuantisation()
+{
+    if (! launchQuantisation)
+        launchQuantisation = std::make_unique<LaunchQuantisation> (state, *this);
+
+    return *launchQuantisation;
 }
 
 //==============================================================================
@@ -2502,12 +2520,12 @@ juce::Array<AutomatableParameter*> Edit::getAllAutomatableParams (bool includeTr
     {
         // Skip the MasterTrack as that is covered by the masterPluginList above
         auto masterTrack = getMasterTrack();
-        
+
         for (auto t : getAllTracks (*this))
         {
             if (t == masterTrack)
                 continue;
-            
+
             list.addArray (t->macroParameterList.getMacroParameters());
             list.addArray (t->getAllAutomatableParams());
         }
@@ -2588,7 +2606,7 @@ std::unique_ptr<Edit> Edit::createEditForPreviewingPreset (Engine& engine, juce:
 
     edit->ensureNumberOfAudioTracks (2);
     edit->isPreviewEdit = true;
-    edit->getTransport().setCurrentPosition (0);
+    edit->getTransport().setPosition (0s);
 
     if (couldMatchTempo != nullptr)
         *couldMatchTempo = false;
@@ -2780,7 +2798,7 @@ std::unique_ptr<Edit> Edit::createEditForPreviewingFile (Engine& engine, const j
 
     edit->ensureNumberOfAudioTracks (3);
     edit->isPreviewEdit = true;
-    edit->getTransport().setCurrentPosition (0);
+    edit->getTransport().setPosition (0s);
 
     if (couldMatchTempo != nullptr)
         *couldMatchTempo = false;

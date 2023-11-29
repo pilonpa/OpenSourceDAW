@@ -157,8 +157,8 @@ struct ClipTrack::CollectionClipList  : public juce::ValueTree::Listener
 };
 
 //==============================================================================
-ClipTrack::ClipTrack (Edit& ed, const juce::ValueTree& v, double defaultHeight, double minHeight, double maxHeight)
-    : Track (ed, v, defaultHeight, minHeight, maxHeight)
+ClipTrack::ClipTrack (Edit& ed, const juce::ValueTree& v)
+    : Track (ed, v)
 {
     collectionClipList.reset (new CollectionClipList (*this, state));
 }
@@ -453,6 +453,11 @@ bool ClipTrack::containsAnyMIDIClips() const
 juce::ValueTree& ClipTrack::getClipOwnerState()
 {
     return state;
+}
+
+EditItemID ClipTrack::getClipOwnerID()
+{
+    return itemID;
 }
 
 Selectable* ClipTrack::getClipOwnerSelectable()

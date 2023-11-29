@@ -11,6 +11,24 @@
 namespace tracktion { inline namespace engine
 {
 
+namespace control_surface_utils
+{
+void flipEndToEndIfNotAuto (InputDevice& in)
+{
+    switch (in.getMonitorMode())
+    {
+        case InputDevice::MonitorMode::automatic:
+            return;
+        case InputDevice::MonitorMode::on:
+            in.setMonitorMode (InputDevice::MonitorMode::off);
+        break;
+        case InputDevice::MonitorMode::off:
+            in.setMonitorMode (InputDevice::MonitorMode::on);
+        return;
+    }
+}
+}
+
 ParameterSetting::ParameterSetting() noexcept
 {
     clear();
@@ -43,8 +61,6 @@ ControlSurface::ControlSurface (ExternalControllerManager& ecm)
 
 ControlSurface::~ControlSurface()
 {
-    jassert (owner != nullptr);
-
     notifyListenersOfDeletion();
 }
 
@@ -124,17 +140,17 @@ void ControlSurface::userMovedPanPot (int channelNum, float newPan, bool delta)
         externalControllerManager.userMovedPanPot (owner->channelStart + channelNum, newPan, delta);
 }
 
-void ControlSurface::userMovedAux (int channelNum, float newPosition)
+void ControlSurface::userMovedAux (int channelNum, int auxNum, float newPosition)
 {
     RETURN_IF_SAFE_RECORDING
     if (pickedUp (ctrlAux, channelNum, newPosition))
-        externalControllerManager.userMovedAux (owner->channelStart + channelNum, owner->auxBank, newPosition);
+        externalControllerManager.userMovedAux (owner->channelStart + channelNum, owner->auxBank + auxNum, auxMode, newPosition);
 }
 
-void ControlSurface::userPressedAux (int channelNum)
+void ControlSurface::userPressedAux (int channelNum, int auxNum)
 {
     RETURN_IF_SAFE_RECORDING
-    externalControllerManager.userPressedAux (owner->channelStart + channelNum, owner->auxBank);
+    externalControllerManager.userPressedAux (owner->channelStart + channelNum, owner->auxBank + auxNum);
 }
 
 void ControlSurface::userPressedSolo (int channelNum)
@@ -205,9 +221,9 @@ void ControlSurface::userPressedRecEnable (int channelNum, bool enableEtoE)
 
             for (auto in : ed->getAllInputDevices())
             {
-                if (in->isOnTargetTrack (*track))
+                if (in->getTargets().contains (track->itemID))
                 {
-                    if (in->isRecordingActive (*track))
+                    if (in->isRecordingActive (track->itemID))
                         activeDev.add (in);
                     else
                         inactiveDev.add (in);
@@ -217,22 +233,22 @@ void ControlSurface::userPressedRecEnable (int channelNum, bool enableEtoE)
             if (enableEtoE)
             {
                 for (auto dev : activeDev)
-                    dev->owner.flipEndToEnd();
+                    control_surface_utils::flipEndToEndIfNotAuto (dev->owner);
 
                 for (auto dev : inactiveDev)
-                    dev->owner.flipEndToEnd();
+                    control_surface_utils::flipEndToEndIfNotAuto (dev->owner);
             }
             else
             {
                 if (activeDev.size() > 0)
                 {
                     for (auto dev : activeDev)
-                        dev->setRecordingEnabled (*track, false);
+                        dev->setRecordingEnabled (track->itemID, false);
                 }
                 else
                 {
                     for (auto dev : inactiveDev)
-                        dev->setRecordingEnabled (*track, true);
+                        dev->setRecordingEnabled (track->itemID, true);
                 }
 
                 if (activeDev.size() > 0 || inactiveDev.size() > 0)
@@ -240,6 +256,27 @@ void ControlSurface::userPressedRecEnable (int channelNum, bool enableEtoE)
             }
         }
     }
+}
+
+void ControlSurface::userLaunchedClip (int channelNum, int sceneNum)
+{
+    RETURN_IF_SAFE_RECORDING
+
+    externalControllerManager.userLaunchedClip (owner->channelStart + channelNum, owner->padStart + sceneNum);
+}
+
+void ControlSurface::userStoppedClip (int channelNum)
+{
+    RETURN_IF_SAFE_RECORDING
+
+    externalControllerManager.userStoppedClip (owner->channelStart + channelNum);
+}
+
+void ControlSurface::userLaunchedScene (int sceneNum)
+{
+    RETURN_IF_SAFE_RECORDING
+
+    externalControllerManager.userLaunchedScene (owner->padStart + sceneNum);
 }
 
 void ControlSurface::userPressedHome()         { performIfNotSafeRecording (&AppFunctions::goToStart); }
@@ -266,7 +303,7 @@ void ControlSurface::userPressedStop()
         if (tc->isPlaying() || tc->isRecording())
             tc->stop (false, false);
         else
-            tc->setCurrentPosition (0.0);
+            tc->setPosition (0s);
     }
 }
 
@@ -295,6 +332,12 @@ void ControlSurface::userChangedFaderBanks (int channelNumDelta)
 {
     RETURN_IF_SAFE_RECORDING
     owner->changeFaderBank (channelNumDelta, followsTrackSelection);
+}
+
+void ControlSurface::userChangedPadBanks (int padDelta)
+{
+    RETURN_IF_SAFE_RECORDING
+    owner->changePadBank (padDelta);
 }
 
 void ControlSurface::userChangedAuxBank (int delta)
@@ -496,11 +539,11 @@ void ControlSurface::movePanPot (int channelNum, float newPan)
         info.pickedUp = false;
 }
 
-void ControlSurface::moveAux (int channel, const char*, float newPos)
+void ControlSurface::moveAux (int channel, int auxNum, const char*, float newPos)
 {
     if (! pickUpMode) return;
 
-    auto& info = pickUpMap[{ctrlAux, channel}];
+    auto& info = pickUpMap[{ControlType (ctrlAux + auxNum), channel}];
     info.lastOut = newPos;
 
     if (info.lastIn.has_value())
@@ -526,7 +569,7 @@ void ControlSurface::parameterChanged (int parameterNumber, const ParameterSetti
 {
     if (! pickUpMode) return;
 
-    auto& info = pickUpMap[{ctrlAux, parameterNumber}];
+    auto& info = pickUpMap[{ctrlParam, parameterNumber}];
     info.lastOut = newValue.value;
 
     if (info.lastIn.has_value())

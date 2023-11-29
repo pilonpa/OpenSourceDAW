@@ -175,6 +175,10 @@ juce::Array<Track*> findAllTracksContainingSelectedItems (const SelectableList& 
             if (auto t = i->getTrack())
                 tracks.addIfNotAlreadyThere (t);
 
+    if (tracks.isEmpty())
+        for (auto& cs : items.getItemsOfType<ClipSlot>())
+            tracks.addIfNotAlreadyThere (&cs->track);
+
     std::sort (tracks.begin(), tracks.end(),
                [] (Track* t1, Track* t2)
                {
@@ -575,6 +579,57 @@ juce::Array<ClipEffect*> getAllClipEffects (Edit& edit)
     return res;
 }
 
+
+//==============================================================================
+ClipOwner* findClipOwnerForID (const Edit& edit, EditItemID id)
+{
+    if (auto clipTrack = dynamic_cast<ClipTrack*> (findTrackForID (edit, id)))
+        return clipTrack;
+
+    if (auto clipSlot = findClipSlotForID (edit, id))
+        return clipSlot;
+
+    if (auto containerClip = dynamic_cast<ContainerClip*> (findClipForID (edit, id)))
+        return containerClip;
+
+    return nullptr;
+}
+
+//==============================================================================
+ClipSlot* findClipSlotForID (const Edit& edit, EditItemID id)
+{
+    ClipSlot* result = nullptr;
+
+    edit.visitAllTracksRecursive ([&] (Track& t)
+                                  {
+                                      if (auto at = dynamic_cast<AudioTrack*> (&t))
+                                      {
+                                          for (auto cs : at->getClipSlotList().getClipSlots())
+                                          {
+                                              if (cs->itemID == id)
+                                              {
+                                                  result = cs;
+                                                  return false;
+                                              }
+                                          }
+                                      }
+
+                                      return true;
+                                  });
+
+    return result;
+}
+
+int findClipSlotIndex (ClipSlot& slot)
+{
+    if (auto at = dynamic_cast<AudioTrack*> (&slot.track))
+        return at->getClipSlotList().getClipSlots().indexOf (&slot);
+
+    jassertfalse; // This should never happen
+    return -1;
+}
+
+
 //==============================================================================
 Clip* findClipForID (const Edit& edit, EditItemID clipID)
 {
@@ -757,6 +812,52 @@ juce::Result mergeMidiClips (juce::Array<MidiClip*> clips)
 
     return juce::Result::fail (TRANS("No clips to merge"));
 }
+
+juce::OwnedArray<MidiList> readFileToMidiList (juce::File midiFile, bool importAsNoteExpression)
+{
+    CRASH_TRACER
+    juce::OwnedArray<MidiList> lists;
+    juce::Array<BeatPosition> tempoChangeBeatNumbers;
+    juce::Array<double> bpms;
+    juce::Array<int> numerators, denominators;
+    BeatDuration len;
+
+    if (MidiList::readSeparateTracksFromFile (midiFile, lists,
+                                              tempoChangeBeatNumbers, bpms,
+                                              numerators, denominators, len,
+                                              importAsNoteExpression))
+    {
+        return lists;
+    }
+
+    return {};
+}
+
+MidiClip::Ptr createClipFromFile (juce::File midiFile, ClipOwner& owner, bool importAsNoteExpression)
+{
+    auto lists = readFileToMidiList (std::move (midiFile), importAsNoteExpression);
+
+    if (auto l = lists.getFirst())
+    {
+        const auto& ts = owner.getClipOwnerEdit().tempoSequence;
+        const auto endTime = ts.toTime (l->getLastBeatNumber());
+        const auto barsBeats = ts.toBarsAndBeats (endTime);
+        const auto totalBars = barsBeats.getTotalBars();
+        const auto nextBar = static_cast<int> (std::ceil (totalBars));
+        const auto clipEndTime = ts.toTime ({ nextBar });
+
+        if (auto c = insertMIDIClip (owner, { 0_tp, clipEndTime }))
+        {
+            c->setName (l->getImportedFileName ());
+            c->getSequence ().copyFrom (*l, &owner.getClipOwnerEdit().getUndoManager());
+
+            return c;
+        }
+    }
+
+    return {};
+}
+
 
 //==============================================================================
 Plugin::Array getAllPlugins (const Edit& edit, bool includeMasterVolume)
@@ -1035,5 +1136,51 @@ InputDeviceInstance::RecordingParameters getDefaultRecordingParameters (const Ed
 
     return params;
 }
+
+juce::Result prepareAndPunchRecord (InputDeviceInstance& instance, EditItemID targetID)
+{
+    CRASH_TRACER
+    TRACKTION_ASSERT_MESSAGE_THREAD
+    InputDeviceInstance::InputDeviceDestination* dest = nullptr;
+
+    for (auto inputDest : instance.destinations)
+    {
+        if (inputDest->getTarget() == targetID)
+        {
+            dest = inputDest;
+            break;
+        }
+    }
+
+    if (! dest)
+        return juce::Result::fail (TRANS("Input not assigned to this destination"));
+
+    if (! instance.edit.getTransport().isRecording())
+        return juce::Result::fail (TRANS("Transport must be recording to punch record"));
+
+    if (! dest->recordEnabled)
+        return juce::Result::fail (TRANS("Input must be armed to punch record"));
+
+    // Punch in at the current play time don't punch out until recording is stopped
+    InputDeviceInstance::RecordingParameters params;
+    params.punchRange   = { instance.context.getPosition(), Edit::getMaximumEditTimeRange().getEnd() };
+
+    if (auto [recContexts, errors] = extract (instance.prepareToRecord (params)); errors.isEmpty())
+        instance.startRecording (std::move (recContexts));
+    else
+        return juce::Result::fail (errors[0]);
+
+    return juce::Result::ok();
+}
+
+bool isRecording (EditPlaybackContext& epc)
+{
+    for (auto input : epc.getAllInputs())
+        if (input->isRecording())
+            return true;
+
+    return false;
+}
+
 
 }} // namespace tracktion { inline namespace engine

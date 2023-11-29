@@ -88,7 +88,7 @@ struct MidiTimecodeReader  : private juce::MessageListener,
 
                     if (auto epc = transport.getCurrentPlaybackContext())
                         epc->setSpeedCompensation (speedComp);
-                        
+
                     break;
                 }
 
@@ -136,7 +136,7 @@ private:
         if (transport.isPlaying())
         {
             transport.stop (false, false, false);
-            transport.setCurrentPosition (correctedTime);
+            transport.setPosition (TimePosition::fromSeconds (correctedTime));
             averageDrift = 0.0;
             averageDriftNumSamples = 0;
         }
@@ -162,7 +162,7 @@ private:
                 if (transport.isPlaying())
                 {
                     transport.stop (false, false, false);
-                    transport.setCurrentPosition (correctedTime);
+                    transport.setPosition (TimePosition::fromSeconds (correctedTime));
                     averageDrift = 0.0;
                     averageDriftNumSamples = 0;
                 }
@@ -179,7 +179,7 @@ private:
             }
             else if (m->type == 3) // goto last time
             {
-                transport.setCurrentPosition (correctedTime);
+                transport.setPosition (TimePosition::fromSeconds (correctedTime));
 
                 averageDrift = 0.0;
                 averageDriftNumSamples = 0;
@@ -221,7 +221,7 @@ private:
     void handleMMCGoto (int hours_, int minutes_, int seconds_, int frames_)
     {
         const int fps = owner.edit.getTimecodeFormat().getFPS();
-        transport.setCurrentPosition (hours_ * 3600 + minutes_ * 60 + seconds_ + (1.0 / double (fps) * frames_));
+        transport.setPosition (TimePosition::fromSeconds (hours_ * 3600 + minutes_ * 60 + seconds_ + (1.0 / double (fps) * frames_)));
     }
 
     double getFPS() const noexcept
@@ -271,33 +271,14 @@ struct PhysicalMidiInputDeviceInstance  : public MidiInputDeviceInstanceBase
         return timecodeReader->processMessage (message);
     }
 
-    juce::String prepareToRecord (RecordingParameters params) override
+    std::vector<tl::expected<std::unique_ptr<RecordingContext>, juce::String>> prepareToRecord (RecordingParameters params) override
     {
-        MidiInputDeviceInstanceBase::prepareToRecord (params);
-
         if (getPhysicalMidiInput().inputDevice != nullptr)
-            return {};
+            return MidiInputDeviceInstanceBase::prepareToRecord (params);
 
-        return TRANS("Couldn't open the MIDI port");
-    }
-
-    bool startRecording() override
-    {
-        // We need to keep a list of tracks the are being recorded to
-        // here, since user may un-arm track to stop recording
-        activeTracks.clear();
-
-        for (auto destTrack : getTargetTracks())
-            if (isRecordingActive (*destTrack))
-                activeTracks.add (destTrack);
-        
-        if (getPhysicalMidiInput().inputDevice != nullptr)
-        {
-            getPhysicalMidiInput().masterTimeUpdate (startTime.inSeconds());
-            recording = true;
-        }
-
-        return recording;
+        std::vector<tl::expected<std::unique_ptr<RecordingContext>, juce::String>> res;
+        res.emplace_back (tl::unexpected (TRANS("Couldn't open the MIDI port")));
+        return res;
     }
 
     PhysicalMidiInputDevice& getPhysicalMidiInput() const   { return static_cast<PhysicalMidiInputDevice&> (owner); }
@@ -488,7 +469,7 @@ void PhysicalMidiInputDevice::loadProps()
     if (n != nullptr)
         isTakingControllerMessages = n->getBoolAttribute ("controllerMessages", isTakingControllerMessages);
 
-    MidiInputDevice::loadProps (n.get());
+    MidiInputDevice::loadMidiProps (n.get());
 }
 
 void PhysicalMidiInputDevice::saveProps()
@@ -499,7 +480,7 @@ void PhysicalMidiInputDevice::saveProps()
     juce::XmlElement n ("SETTINGS");
     n.setAttribute ("controllerMessages", isTakingControllerMessages);
 
-    MidiInputDevice::saveProps (n);
+    MidiInputDevice::saveMidiProps (n);
 
     engine.getPropertyStorage().setXmlPropertyItem (SettingID::midiin, getName(), n);
 }

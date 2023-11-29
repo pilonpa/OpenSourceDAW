@@ -86,9 +86,9 @@ public:
     // pan is -1.0 to 1.0
     virtual void movePanPot ([[maybe_unused]] int channelNum, [[maybe_unused]] float newPan);
 
-    virtual void moveAux ([[maybe_unused]] int channel, [[maybe_unused]] const char* bus, [[maybe_unused]] float newPos);
+    virtual void moveAux ([[maybe_unused]] int channel, [[maybe_unused]] int auxNum, [[maybe_unused]] const char* bus, [[maybe_unused]] float newPos);
 
-    virtual void clearAux (int) {}
+    virtual void clearAux ([[maybe_unused]] int channel, [[maybe_unused]] int auxNum) {}
 
     // the channel number is the physical channel on the device, regardless of bank selection
     virtual void updateSoloAndMute ([[maybe_unused]] int channelNum, Track::MuteAndSoloLightState, [[maybe_unused]] bool isBright) {}
@@ -114,6 +114,14 @@ public:
     // the trackname array is the set of names for the tracks that now map onto the device's physical
     // fader channels, so if it has a display that can show track names, it should update this.
     virtual void faderBankChanged ([[maybe_unused]] int newStartChannelNumber, [[maybe_unused]] const juce::StringArray& trackNames) {}
+
+    // tells the device that a pad has changed colour
+    // colour 0: off
+    // colour 1 - 18: hue = (colour - 1) / 18
+    // state 0: solid
+    // state 1: blink
+    // state 2: pulse
+    virtual void padStateChanged ([[maybe_unused]] int channelNumber, [[maybe_unused]] int sceneNumber, [[maybe_unused]] int colourIdx, [[maybe_unused]] int state) {}
 
     // if the device has per-channel level meters, this should update one of them.
     // the channel number is the physical channel on the device, regardless of bank selection
@@ -234,8 +242,8 @@ public:
     void userMovedMasterLevelFader (float newLevel, bool delta = false);
     void userMovedMasterPanPot (float newLevel);
 
-    void userMovedAux (int channelNum, float newPosition);
-    void userPressedAux (int channelNum);
+    void userMovedAux (int channelNum, int auxNum, float newPosition);
+    void userPressedAux (int channelNum, int auxNum);
     void userMovedQuickParam (float newLevel);
 
     // these tell tracktion about buttons being pressed
@@ -246,6 +254,9 @@ public:
     void userSelectedClipInTrack (int channelNum);
     void userSelectedPluginInTrack (int channelNum);
     void userPressedRecEnable (int channelNum, bool enableEtoE);
+    void userLaunchedClip (int channelNum, int sceneNum);
+    void userStoppedClip (int channelNum);
+    void userLaunchedScene (int sceneNum);
     void userPressedPlay();
     void userPressedRecord();
     void userPressedStop();
@@ -319,6 +330,11 @@ public:
     // device what its new state is.
     void userChangedFaderBanks (int channelNumDelta);
 
+    // tells tracktion to move the pad bank up or down by the specified number of channels.
+    // After calling this, tracktion will call back the onPadStateChanged() method for each pad
+    // to tell the device what its new state is.
+    void userChangedPadBanks (int padDelta);
+
     // tells tracktion to move the cursor.
     //
     // amount < 0 means moving backwards, amount > 0 forwards
@@ -379,6 +395,9 @@ public:
     int numberOfFaderChannels = 0;
     int numCharactersForTrackNames = 0;
 
+    // number of physical pads per channel
+    int numberOfTrackPads = 0;
+
     // is banking to the right allowed to show empty tracks
     bool allowBankingOffEnd = false;
 
@@ -398,6 +417,7 @@ public:
     int numCharactersForAuxLabels = 0;
     bool wantsAuxBanks = false;
     bool followsTrackSelection = false;
+    AuxPosition auxMode = AuxPosition::byBus;
 
     Engine& engine;
     ExternalControllerManager& externalControllerManager;
@@ -409,8 +429,8 @@ private:
         ctrlFader,
         ctrlMasterFader,
         ctrlPan,
-        ctrlAux,
         ctrlParam,
+        ctrlAux,    // aux must be last because there can be several of them
     };
 
     struct PickUpInfo

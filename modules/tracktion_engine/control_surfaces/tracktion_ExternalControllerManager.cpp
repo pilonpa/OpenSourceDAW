@@ -13,17 +13,25 @@ namespace tracktion { inline namespace engine
 
 struct ExternalControllerManager::EditTreeWatcher   : private juce::ValueTree::Listener,
                                                       private juce::Timer,
-                                                      private juce::AsyncUpdater
+                                                      private juce::AsyncUpdater,
+                                                      private SceneWatcher::Listener 
 {
     EditTreeWatcher (ExternalControllerManager& o, Edit& e) : owner (o), edit (e)
     {
         edit.state.addListener (this);
+        edit.getSceneList().sceneWatcher.addListener (this);
         startTimer (40);
     }
 
     ~EditTreeWatcher() override
     {
         edit.state.removeListener (this);
+        edit.getSceneList().sceneWatcher.removeListener (this);
+    }
+
+    void slotUpdated (int, int) override
+    {
+        updatePads.set (true);
     }
 
 private:
@@ -33,10 +41,16 @@ private:
 
     juce::Array<juce::ValueTree, juce::CriticalSection> pluginsToUpdate;
     juce::Atomic<int> updateAux;
+    juce::Atomic<bool> updatePads;
 
     void valueTreePropertyChanged (juce::ValueTree& v, const juce::Identifier& i) override
     {
-        if (v.hasType (IDs::PLUGIN))
+        if (v.hasType (IDs::AUDIOCLIP) || v.hasType (IDs::MIDICLIP))
+        {
+            if (i == IDs::colour)
+                updatePads.set (true);
+        }
+        else if (v.hasType (IDs::PLUGIN))
         {
             if (i == IDs::volume || i == IDs::pan)
                 pluginsToUpdate.addIfNotAlreadyThere (v);
@@ -95,6 +109,9 @@ private:
 
         if (updateAux.compareAndSetBool (0, 1))
             owner.auxSendLevelsChanged();
+
+        if (updatePads.compareAndSetBool (false, true))
+            owner.updatePadColours();
     }
 
     void handleAsyncUpdate() override
@@ -360,6 +377,7 @@ void ExternalControllerManager::updateTrackRecordLights()   { FOR_EACH_ACTIVE_DE
 void ExternalControllerManager::updatePunchLights()         { FOR_EACH_ACTIVE_DEVICE (updatePunchLights()); }
 void ExternalControllerManager::updateScrollLights()        { FOR_EACH_ACTIVE_DEVICE (updateScrollLights()); }
 void ExternalControllerManager::updateUndoLights()          { FOR_EACH_ACTIVE_DEVICE (updateUndoLights()); }
+void ExternalControllerManager::updatePadColours()          { FOR_EACH_ACTIVE_DEVICE (updatePadColours()); }
 
 void ExternalControllerManager::changeListenerCallback (ChangeBroadcaster* source)
 {
@@ -369,6 +387,7 @@ void ExternalControllerManager::changeListenerCallback (ChangeBroadcaster* sourc
     {
         playStateChanged (tc->isPlaying());
         recordStateChanged (tc->isRecording());
+        updatePadColours();
     }
     else if (currentSelectionManager != nullptr)
     {
@@ -709,10 +728,10 @@ void ExternalControllerManager::userMovedPanPot (int channelNum, float newPan, b
     }
 }
 
-void ExternalControllerManager::userMovedAux (int channelNum, int auxNum, float newPosition)
+void ExternalControllerManager::userMovedAux (int channelNum, int auxNum, AuxPosition ap, float newPosition)
 {
     if (auto t = dynamic_cast<AudioTrack*> (getChannelTrack (channelNum)))
-        if (auto aux = t->getAuxSendPlugin (auxNum))
+        if (auto aux = t->getAuxSendPlugin (auxNum, ap))
             aux->setGainDb (volumeFaderPositionToDB (newPosition));
 }
 
@@ -721,6 +740,29 @@ void ExternalControllerManager::userPressedAux (int channelNum, int auxNum)
     if (auto t = dynamic_cast<AudioTrack*> (getChannelTrack (channelNum)))
         if (auto aux = t->getAuxSendPlugin (auxNum))
             aux->setMute (! aux->isMute());
+}
+
+void ExternalControllerManager::userLaunchedClip (int channelNum, int sceneNum)
+{
+	if (launchClip && currentEdit)
+		if (auto t = dynamic_cast<AudioTrack*> (getChannelTrack (channelNum)))
+			launchClip (*currentEdit, *t, sceneNum);
+}
+
+void ExternalControllerManager::userStoppedClip (int channelNum)
+{
+    if (stopClip && currentEdit)
+    {
+        auto t = dynamic_cast<AudioTrack*> (getChannelTrack (channelNum));
+        stopClip (*currentEdit, t);
+    }
+}
+
+
+void ExternalControllerManager::userLaunchedScene (int sceneNum)
+{
+	if (launchScene && currentEdit)
+		launchScene (*currentEdit, sceneNum);
 }
 
 void ExternalControllerManager::userMovedQuickParam (float newLevel)

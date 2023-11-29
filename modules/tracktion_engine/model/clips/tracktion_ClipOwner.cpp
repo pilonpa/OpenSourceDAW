@@ -12,8 +12,7 @@ namespace tracktion { inline namespace engine
 {
 
 struct ClipOwner::ClipList : public ValueTreeObjectList<Clip>,
-                             private juce::AsyncUpdater,
-                             private TransportControl::Listener
+                             private juce::AsyncUpdater
 {
     ClipList (ClipOwner& co, Edit& e, const juce::ValueTree& parentTree)
         : ValueTreeObjectList<Clip> (parentTree),
@@ -23,13 +22,10 @@ struct ClipOwner::ClipList : public ValueTreeObjectList<Clip>,
         rebuildObjects();
 
         editLoadedCallback.reset (new Edit::LoadFinishedCallback<ClipList> (*this, edit));
-        edit.getTransport().addListener (this);
     }
 
     ~ClipList() override
     {
-        edit.getTransport().removeListener (this);
-
         for (auto c : objects)
         {
             c->flushStateToValueTree();
@@ -72,7 +68,7 @@ struct ClipOwner::ClipList : public ValueTreeObjectList<Clip>,
         objectAddedOrRemoved (c);
 
         if (c && ! edit.getUndoManager().isPerformingUndoRedo())
-            edit.engine.getEngineBehaviour().newClipAdded (*c, recordingIsStopping);
+            edit.engine.getEngineBehaviour().newClipAdded (*c, edit.getTransport().isRecordingStopping());
     }
 
     void objectRemoved (Clip* c) override       { objectAddedOrRemoved (c); }
@@ -163,26 +159,6 @@ struct ClipOwner::ClipList : public ValueTreeObjectList<Clip>,
         clipOwner.clipPositionChanged();
     }
 
-private:
-    bool recordingIsStopping = false;
-
-    void playbackContextChanged() override {}
-    void autoSaveNow() override {}
-    void setAllLevelMetersActive (bool) override {}
-    void setVideoPosition (TimePosition, bool) override {}
-    void startVideo() override {}
-    void stopVideo() override {}
-
-    void recordingAboutToStop (InputDeviceInstance&) override
-    {
-        recordingIsStopping = true;
-    }
-
-    void recordingFinished (InputDeviceInstance&, const juce::ReferenceCountedArray<Clip>&) override
-    {
-        recordingIsStopping = false;
-    }
-    
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ClipList)
 };
 
@@ -338,6 +314,10 @@ Clip* insertClipWithState (ClipOwner& clipOwner, juce::ValueTree clipState)
 
     if (clipOwner.getClips().size() < engineBehaviour.getEditLimits().maxClipsInTrack)
     {
+        if (auto clipSlot = dynamic_cast<ClipSlot*> (clipOwner.getClipOwnerSelectable()))
+            if (auto existingClip = clipSlot->getClip())
+                existingClip->removeFromParent();
+
         clipOwner.getClipOwnerState().addChild (clipState, -1, &edit.getUndoManager());
 
         if (auto newClip = findClipForState (clipOwner, clipState))
@@ -363,6 +343,18 @@ Clip* insertClipWithState (ClipOwner& clipOwner, juce::ValueTree clipState)
 
                     if (! clipState.hasProperty (IDs::resamplingQuality))
                         acb->setResamplingQuality (defaults.resamplingQuality);
+                }
+            }
+            else if (auto clipSlot = dynamic_cast<ClipSlot*> (clipOwner.getClipOwnerSelectable()))
+            {
+                if (auto acb = dynamic_cast<AudioClipBase*> (newClip))
+                {
+                    acb->setUsesProxy (false);
+                    acb->setAutoTempo (true);
+                }
+                else if (auto mc = dynamic_cast<MidiClip*> (newClip))
+                {
+                    mc->setUsesProxy (false);
                 }
             }
 
@@ -423,12 +415,12 @@ Clip* insertClipWithState (ClipOwner& parent,
     return {};
 }
 
-Clip* insertNewClip (ClipOwner& parent, TrackItem::Type type, const juce::String& name, TimeRange pos)
+Clip* insertNewClip (ClipOwner& parent, TrackItem::Type type, const juce::String& name, EditTimeRange pos)
 {
-    return insertNewClip (parent, type, name, { pos, 0_td });
+    return insertNewClip (parent, type, name, { toTime (pos, parent.getClipOwnerEdit().tempoSequence), 0_td });
 }
 
-Clip* insertNewClip (ClipOwner& parent, TrackItem::Type type, TimeRange pos)
+Clip* insertNewClip (ClipOwner& parent, TrackItem::Type type, EditTimeRange pos)
 {
     return insertNewClip (parent, type, TrackItem::getSuggestedNameForNewItem (type), pos);
 }

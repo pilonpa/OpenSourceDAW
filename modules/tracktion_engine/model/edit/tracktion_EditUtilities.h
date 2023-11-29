@@ -92,6 +92,20 @@ juce::Array<Track*> toTrackArray (Edit&, const juce::BigInteger&);
 template<typename TrackItemType>
 [[ nodiscard ]] juce::Array<TrackItemType*> getTrackItemsOfType (const Track&);
 
+/** Returns the ClipOwner with a given ID if it can be found in the Edit. */
+ClipOwner* findClipOwnerForID (const Edit&, EditItemID);
+
+
+//==============================================================================
+// ClipSlots
+//==============================================================================
+/** Returns the ClipSlot for the given ID. */
+ClipSlot* findClipSlotForID (const Edit&, EditItemID);
+
+/** Returns the index of the ClipSlot in the list it is owned by. */
+int findClipSlotIndex (ClipSlot&);
+
+
 //==============================================================================
 // Clips
 //==============================================================================
@@ -161,6 +175,15 @@ MidiNote* findNoteForState (const Edit&, const juce::ValueTree&);
 
 /** Merges a set of MIDI clips in to one new one. */
 juce::Result mergeMidiClips (juce::Array<MidiClip*>);
+
+/** Helper function to read a file to a number of MidiLists. */
+juce::OwnedArray<MidiList> readFileToMidiList (juce::File midiFile, bool importAsNoteExpression);
+
+/** Helper function to read a MIDI file and create a MidiClip from it.
+    N.B. This will only use the first track in the file, any other tracks will be discarded.
+    The clip will be positioned at 0 with a beat length the duration of the imported list.
+*/
+MidiClip::Ptr createClipFromFile (juce::File midiFile, ClipOwner&, bool importAsNoteExpression);
 
 
 //==============================================================================
@@ -244,6 +267,14 @@ juce::Array<MacroParameterElement*> getAllMacroParameterElements (const Edit&);
 InputDeviceInstance::RecordingParameters getDefaultRecordingParameters (const EditPlaybackContext&,
                                                                         TimePosition playStart,
                                                                         TimePosition punchIn);
+
+/** Starts an InputDeviceInstance recording to the given target without any count-in etc.
+    N.B. The input must already be assigned to the target and armed for the punch to start.
+*/
+juce::Result prepareAndPunchRecord (InputDeviceInstance&, EditItemID);
+
+/** Returns true if any inputs are currently recording. */
+bool isRecording (EditPlaybackContext&);
 
 
 //==============================================================================

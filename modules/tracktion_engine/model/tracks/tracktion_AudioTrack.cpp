@@ -93,7 +93,7 @@ private:
 
 //==============================================================================
 AudioTrack::AudioTrack (Edit& ed, const juce::ValueTree& v)
-    : ClipTrack (ed, v, 50, 13, 2000)
+    : ClipTrack (ed, v)
 {
     soloed.referTo (state, IDs::solo, nullptr);
     soloIsolated.referTo (state, IDs::soloIsolate, nullptr);
@@ -226,12 +226,31 @@ VolumeAndPanPlugin* AudioTrack::getVolumePlugin()     { return pluginList.getPlu
 LevelMeterPlugin* AudioTrack::getLevelMeterPlugin()   { return pluginList.getPluginsOfType<LevelMeterPlugin>().getLast(); }
 EqualiserPlugin* AudioTrack::getEqualiserPlugin()     { return pluginList.getPluginsOfType<EqualiserPlugin>().getLast(); }
 
-AuxSendPlugin* AudioTrack::getAuxSendPlugin (int bus) const
+AuxSendPlugin* AudioTrack::getAuxSendPlugin (int bus, AuxPosition ap) const
 {
-    for (auto p : pluginList)
-        if (auto f = dynamic_cast<AuxSendPlugin*> (p))
-            if (bus < 0 || bus == f->getBusNumber())
-                return f;
+    if (ap == AuxPosition::byBus)
+    {
+        for (auto p : pluginList)
+            if (auto f = dynamic_cast<AuxSendPlugin*> (p))
+                if (bus < 0 || bus == f->getBusNumber())
+                    return f;
+    }
+    else if (ap == AuxPosition::byPosition)
+    {
+        jassert(bus >= 0);
+
+        int idx = 0;
+        for (auto p : pluginList)
+        {
+            if (auto f = dynamic_cast<AuxSendPlugin*> (p))
+            {
+                if (idx == bus)
+                    return f;
+
+                idx++;
+            }
+        }
+    }
 
     return {};
 }
@@ -289,7 +308,7 @@ void AudioTrack::updateMidiNoteMapCache()
         for (int i = 0; i < l.length(); i++)
         {
             auto c = l[i];
-            
+
             if (juce::CharacterFunctions::isDigit (c))
                 digits++;
             else
@@ -383,7 +402,7 @@ bool AudioTrack::isMuted (bool includeMutingByDestination) const
     {
         if (auto p = getParentFolderTrack())
             return p->isMuted (true);
-        
+
         if (auto dest = output->getDestinationTrack())
             return dest->isMuted (true);
     }
@@ -513,6 +532,16 @@ bool AudioTrack::canPlayMidi() const
     return false;
 }
 
+//==============================================================================
+ClipSlotList& AudioTrack::getClipSlotList()
+{
+    if (! clipSlotList)
+        clipSlotList = std::make_unique<ClipSlotList> (state.getOrCreateChildWithName (IDs::CLIPSLOTS, &edit.getUndoManager()), *this);
+
+    return *clipSlotList;
+}
+
+//==============================================================================
 void AudioTrack::setMidiVerticalPos (double visibleProp, double offset)
 {
     visibleProp             = juce::jlimit (0.0, 1.0, visibleProp);
@@ -611,7 +640,7 @@ void AudioTrack::playGuideNotes (const juce::Array<int>& notes, MidiChannel midi
 void AudioTrack::turnOffGuideNotes()
 {
     stopTimer();
-    
+
     for (int ch = 1; ch <= 16; ch++)
         turnOffGuideNotes (MidiChannel (ch));
 }
@@ -681,7 +710,7 @@ void AudioTrack::valueTreePropertyChanged (juce::ValueTree& v, const juce::Ident
         else if (i == IDs::name)
         {
             auto devName = getName();
-            
+
             waveInputDevice->setAlias (devName);
             midiInputDevice->setAlias (devName);
         }
@@ -706,12 +735,20 @@ void AudioTrack::valueTreePropertyChanged (juce::ValueTree& v, const juce::Ident
     ClipTrack::valueTreePropertyChanged (v, i);
 }
 
+void AudioTrack::valueTreeParentChanged (juce::ValueTree& v)
+{
+    ClipTrack::valueTreeParentChanged (v);
+
+    if (state.getParent().isValid())
+        if (int numScenes = getClipSlotList().getClipSlots().size(); numScenes > 0)
+            edit.getSceneList().ensureNumberOfScenes (getClipSlotList().getClipSlots().size());
+}
 
 //==============================================================================
 bool AudioTrack::hasAnyLiveInputs()
 {
     for (auto in : edit.getAllInputDevices())
-        if (in->isRecordingActive (*this) && in->isOnTargetTrack (*this))
+        if (in->isRecordingActive (itemID) && in->getTargets().contains (itemID))
             return true;
 
     return false;
@@ -742,12 +779,9 @@ void AudioTrack::injectLiveMidiMessage (const juce::MidiMessage& m, MidiMessageA
     injectLiveMidiMessage ({ m, source });
 }
 
-bool AudioTrack::mergeInMidiSequence (const juce::MidiMessageSequence& original, TimePosition startTime,
+bool AudioTrack::mergeInMidiSequence (juce::MidiMessageSequence ms, TimePosition startTime,
                                       MidiClip* mc, MidiList::NoteAutomationType automationType)
 {
-    auto ms = original;
-    ms.addTimeToMessages (startTime.inSeconds());
-
     const auto start = TimePosition::fromSeconds (ms.getStartTime());
     const auto end = TimePosition::fromSeconds (ms.getEndTime());
 
@@ -767,15 +801,7 @@ bool AudioTrack::mergeInMidiSequence (const juce::MidiMessageSequence& original,
 
     if (mc != nullptr)
     {
-        auto pos = mc->getPosition();
-
-        if (pos.getStart() > start)
-            mc->extendStart (std::max (TimePosition(), start - TimeDuration::fromSeconds (0.1)));
-
-        if (pos.getEnd() < end)
-            mc->setEnd (end + TimeDuration::fromSeconds (0.1), true);
-
-        mc->mergeInMidiSequence (ms, automationType);
+        tracktion::mergeInMidiSequence (*mc, std::move (ms), toDuration (startTime), automationType);
         return true;
     }
 
@@ -851,10 +877,10 @@ void AudioTrack::setFrozen (bool b, FreezeType type)
                 {
                     if (auto folder = getParentFolderTrack())
                         return folder->isSubmixFolder();
-                        
+
                     return false;
                 };
-                
+
                 if (b && (getOutput().getDestinationTrack() != nullptr || outputsToSubmixTrack()))
                 {
                     edit.engine.getUIBehaviour().showWarningMessage (TRANS("Tracks which output to another track can't themselves be frozen; "
@@ -928,7 +954,7 @@ void AudioTrack::freezeTrack()
     const Edit::ScopedRenderStatus srs (edit, true);
     const auto desc = TRANS("Creating track freeze for \"XDVX\"")
                         .replace ("XDVX", getName()) + "...";
-    
+
     if (r.engine->getProjectManager().getProject (edit) != nullptr)
         Renderer::renderToProjectItem (desc, r);
     else

@@ -18,11 +18,15 @@
 #define GRAPH_UNIT_TESTS_EDITNODE                       1
 
 #define ENGINE_UNIT_TESTS_CLIPBOARD                     1
+#define ENGINE_UNIT_TESTS_CLIPSLOT                      1
 #define ENGINE_UNIT_TESTS_CONSTRAINED_CACHED_VALUE      1
 #define ENGINE_UNIT_TESTS_DELAY_PLUGIN                  1
 #define ENGINE_UNIT_TESTS_EDIT                          1
 #define ENGINE_UNIT_TESTS_EDIT_TIME                     1
 #define ENGINE_UNIT_TESTS_FREEZE                        1
+#define ENGINE_UNIT_TESTS_LAUNCH_HANDLE                 1
+#define ENGINE_UNIT_TESTS_LAUNCHER_CLIP_PLAYBACK_HANDLE 1
+#define ENGINE_UNIT_TESTS_LAUNCH_QUANTISATION           1
 #define ENGINE_UNIT_TESTS_LOOPINGMIDINODE               1
 #define ENGINE_UNIT_TESTS_LOOP_INFO                     1
 #define ENGINE_UNIT_TESTS_MIDILIST                      1

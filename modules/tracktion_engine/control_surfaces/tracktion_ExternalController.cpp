@@ -26,7 +26,7 @@ ExternalController::ExternalController (Engine& e, ControlSurface* c)  : engine 
     wantsClock = cs.wantsClock;
     followsTrackSelection = cs.followsTrackSelection;
     deletable = cs.deletable;
-    auxBank = cs.wantsAuxBanks ? 0 : -1;
+    auxBank = cs.wantsAuxBanks || cs.auxMode == AuxPosition::byPosition ? 0 : -1;
     allowBankingOffEnd = cs.allowBankingOffEnd;
 
     numDevices = engine.getPropertyStorage().getPropertyItem (SettingID::externControlNum, getName(), 1);
@@ -288,14 +288,21 @@ void ExternalController::midiInOutDevicesChanged()
         CRASH_TRACER
         auto mo = dm.getMidiOutDevice (i);
 
+        bool used = false;
         for (int j = 0; j < numDevices; j++)
         {
             if (mo != nullptr && mo->isEnabled() && mo->getName().equalsIgnoreCase (outputDeviceName[j]))
             {
                 outputDevices[j] = mo;
                 mo->setSendControllerMidiClock (wantsClock);
+                used = true;
             }
         }
+
+        if (used)
+            mo->setExternalController (this);
+        else
+            mo->removeExternalController (this);
     }
 
     startTimer (100);
@@ -304,7 +311,7 @@ void ExternalController::midiInOutDevicesChanged()
 void ExternalController::timerCallback()
 {
     stopTimer();
-    
+
     CRASH_TRACER
     if (controlSurface != nullptr)
         getControlSurface().initialiseDevice (isEnabled());
@@ -351,7 +358,7 @@ bool ExternalController::isUsingMidiOutputDevice (const MidiOutputDevice* d) con
     for (auto od : outputDevices)
         if (od == d)
             return true;
-    
+
     return false;
 }
 
@@ -594,6 +601,15 @@ void ExternalController::changeFaderBank (int delta, bool moveSelection)
                             sm->selectOnly (t);
             }
         }
+    }
+}
+
+void ExternalController::changePadBank (int delta)
+{
+    if (controlSurface != nullptr)
+    {
+        padStart = std::max (0, padStart + delta);
+        updatePadColours();
     }
 }
 
@@ -884,7 +900,7 @@ void ExternalController::updateTrackRecordLights()
                 {
                     if (auto at = dynamic_cast<AudioTrack*> (t))
                     {
-                        if (in->isRecordingActive (*at) && in->getTargetTracks().contains (at))
+                        if (in->isRecordingActive (at->itemID) && in->getTargets().contains (at->itemID))
                         {
                             isRecording = true;
                             break;
@@ -917,6 +933,56 @@ void ExternalController::updateUndoLights()
         if (auto cs = controlSurface.get())
             cs->undoStatusChanged (ed->getUndoManager().canUndo(),
                                    ed->getUndoManager().canRedo());
+}
+
+void ExternalController::updatePadColours()
+{
+    auto& ecm = getExternalControllerManager();
+    auto& cs = getControlSurface();
+
+    if (cs.numberOfTrackPads > 0)
+    {
+        for (auto track = 0; track < cs.numberOfFaderChannels; track++)
+        {
+            for (auto scene = 0; scene < cs.numberOfTrackPads; scene++)
+            {
+                auto colourIdx = 0;
+                auto state = 0;
+
+                if (auto at = dynamic_cast<AudioTrack*> (ecm.getChannelTrack (track + channelStart)))
+                {
+                    if (auto slot = at->getClipSlotList().getClipSlots()[padStart + scene])
+                    {
+                        if (auto c = slot->getClip())
+                        {
+                            auto col = c->getColour();
+
+                            if (! col.isTransparent())
+                            {
+                                auto numColours = 19;
+                                auto newHue = col.getHue();
+
+                                colourIdx = juce::jlimit (0, numColours - 1, juce::roundToInt (newHue * (numColours - 1) + 1));
+                            }
+
+                            if (auto tc = getTransport())
+                            {
+                                if (auto lh = c->getLaunchHandle())
+                                {
+                                    if (lh->getPlayingStatus() == LaunchHandle::PlayState::playing)
+                                        state = tc->isPlaying() ? 2 : 1;
+                                    else if (lh->getQueuedStatus() == LaunchHandle::QueueState::playQueued)
+                                        state = 1;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                cs.padStateChanged (track, scene, colourIdx, state);
+            }
+        }
+    }
 }
 
 void ExternalController::updateDeviceState()
@@ -1009,6 +1075,8 @@ void ExternalController::updateDeviceState()
 
                 cs.faderBankChanged (channelStart, trackNames);
 
+                updatePadColours();
+
                 if (cs.showingMarkers())
                     ecm.updateMarkers();
             }
@@ -1058,24 +1126,42 @@ void ExternalController::auxSendLevelsChanged()
             {
                 auto at = dynamic_cast<AudioTrack*> (t);
 
-                if (auto aux = at ? at->getAuxSendPlugin (auxBank) : nullptr)
+                if (cs.auxMode == AuxPosition::byPosition)
+                {
+                    for (auto i = 0; i < cs.numAuxes; i++)
+                    {
+                        if (auto aux = at->getAuxSendPlugin (auxBank + i, AuxPosition::byPosition))
+                        {
+                            auto nm = aux->getBusName();
+
+                            if (nm.length() > cs.numCharactersForAuxLabels)
+                                nm = shortenName (nm, 7);
+
+                            cs.moveAux (chan - channelStart, i, nm.toRawUTF8(), decibelsToVolumeFaderPosition (aux->getGainDb()));
+                        }
+                        else
+                        {
+                            cs.clearAux (chan - channelStart, i);
+                        }
+                    }
+                }
+                else if (auto aux = at ? at->getAuxSendPlugin (auxBank) : nullptr)
                 {
                     auto nm = aux->getBusName();
 
                     if (nm.length() > cs.numCharactersForAuxLabels)
                         nm = shortenName (nm, 7);
 
-                    cs.moveAux (chan - channelStart, nm.toRawUTF8(),
-                                decibelsToVolumeFaderPosition (aux->getGainDb()));
+                    cs.moveAux (chan - channelStart, 0, nm.toRawUTF8(), decibelsToVolumeFaderPosition (aux->getGainDb()));
                 }
                 else
                 {
-                    cs.clearAux (chan - channelStart);
+                    cs.clearAux (chan - channelStart, 0);
                 }
             }
             else
             {
-                cs.clearAux (chan - channelStart);
+                cs.clearAux (chan - channelStart, 0);
             }
         }
     }
@@ -1305,7 +1391,10 @@ void ExternalController::changeAuxBank (int delta)
 {
     if (controlSurface != nullptr)
     {
-        auxBank = juce::jlimit (-1, 7, auxBank + delta);
+        if (getControlSurface().auxMode == AuxPosition::byPosition)
+            auxBank = juce::jlimit (0, 15, auxBank + delta);
+        else
+            auxBank = juce::jlimit (-1, 31, auxBank + delta);
 
         getControlSurface().auxBankChanged (auxBank);
         auxSendLevelsChanged();

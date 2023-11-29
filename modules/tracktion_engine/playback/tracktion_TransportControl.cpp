@@ -289,7 +289,6 @@ struct TransportControl::SectionPlayer  : private Timer
 {
     SectionPlayer (TransportControl& tc, TimeRange sectionToPlay)
         : transport (tc), section (sectionToPlay),
-          originalTransportTime (tc.getCurrentPosition()),
           wasLooping (tc.looping)
     {
         jassert (! sectionToPlay.isEmpty());
@@ -308,7 +307,6 @@ struct TransportControl::SectionPlayer  : private Timer
 
     TransportControl& transport;
     const TimeRange section;
-    const double originalTransportTime;
     const bool wasLooping;
 
     void timerCallback() override
@@ -671,14 +669,21 @@ std::vector<std::unique_ptr<TransportControl::ScopedContextAllocator>> Transport
     return restartHandles;
 }
 
-void TransportControl::callRecordingAboutToStopListeners (InputDeviceInstance& in)
+void TransportControl::callRecordingAboutToStartListeners (InputDeviceInstance& in, EditItemID targetID)
 {
-    listeners.call (&Listener::recordingAboutToStop, in);
+    listeners.call (&Listener::recordingAboutToStart, in, targetID);
 }
 
-void TransportControl::callRecordingFinishedListeners (InputDeviceInstance& in, Clip::Array recordedClips)
+void TransportControl::callRecordingAboutToStopListeners (InputDeviceInstance& in, EditItemID targetID)
 {
-    listeners.call (&Listener::recordingFinished, in, recordedClips);
+    recordingIsStoppingFlag = true;
+    listeners.call (&Listener::recordingAboutToStop, in, targetID);
+}
+
+void TransportControl::callRecordingFinishedListeners (InputDeviceInstance& in, EditItemID targetID, Clip::Array recordedClips)
+{
+    recordingIsStoppingFlag = false;
+    listeners.call (&Listener::recordingFinished, in, targetID, recordedClips);
 }
 
 TransportControl::PlayingFlag::PlayingFlag (Engine& e) noexcept : engine (e)    { ++engine.getActiveEdits().numTransportsPlaying; }
@@ -934,6 +939,8 @@ bool TransportControl::isPlaying() const                { return transportState-
 bool TransportControl::isRecording() const              { return transportState->recording; }
 bool TransportControl::isSafeRecording() const          { return isRecording() && transportState->safeRecording; }
 bool TransportControl::isStopping() const               { return isStopInProgress; }
+bool TransportControl::isRecordingStopping() const      { return recordingIsStoppingFlag; }
+
 
 TimePosition TransportControl::getTimeWhenStarted() const   { return transportState->startTime.get(); }
 
@@ -1052,20 +1059,9 @@ void TransportControl::nudgeRight()
 
 
 //==============================================================================
-double TransportControl::getCurrentPosition() const
-{
-    return position.get().inSeconds();
-}
-
 TimePosition TransportControl::getPosition() const
 {
     return position.get();
-}
-
-void TransportControl::setCurrentPosition (double newPos)
-{
-    CRASH_TRACER
-    setPosition (TimePosition::fromSeconds (newPos));
 }
 
 void TransportControl::setPosition (TimePosition t)
@@ -1498,7 +1494,7 @@ void TransportControl::performStop()
     if (! juce::Component::isMouseButtonDownAnywhere())
         setUserDragging (false); // in case it gets stuck
 
-    if (isRecording())
+    if (isRecording() || tracktion::isRecording (*playbackContext))
     {
         CRASH_TRACER
 
@@ -1508,8 +1504,8 @@ void TransportControl::performStop()
 
         clearPlayingFlags();
         playHeadWrapper->stop();
-        playbackContext->recordingFinished ({ transportState->startTime, std::max (recEndTime, transportState->startTime.get()) },
-                                            transportState->discardRecordings);
+        playbackContext->stopRecording (recEndTime, transportState->discardRecordings)
+            .map_error ([this] (auto err) { engine.getUIBehaviour().showWarningAlert (TRANS("Recording"), err); });
 
         position = transportState->discardRecordings ? transportState->startTime.get()
                                                      : (looping ? recEndPos

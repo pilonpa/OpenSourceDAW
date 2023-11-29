@@ -41,6 +41,15 @@ public:
     /** Callback that can be set allow surfaces to show the scroll status of an Edit. */
     std::function<bool (Edit&)> isScrollingEnabled;
 
+	/** Launch clip by track and index */
+	std::function<void (Edit&, AudioTrack&, int)> launchClip;
+
+    /** Stop all clips on track. If track is nullptr, stop all tracks */
+    std::function<void (Edit&, AudioTrack*)> stopClip;
+
+	/** Launch scene by index */
+	std::function<void (Edit&, int)> launchScene;
+
     //==============================================================================
     void setCurrentEdit (Edit*, SelectionManager*);
     void detachFromEdit (Edit*);
@@ -110,6 +119,7 @@ public:
     void updatePunchLights();
     void updateScrollLights();
     void updateUndoLights();
+    void updatePadColours();
 
     int getNumChannelTracks() const;
     Track* getChannelTrack (int channel) const;
@@ -132,9 +142,12 @@ public:
     void userSelectedTrack (int channelNum);
     void userSelectedClipInTrack (int channelNum);
     void userSelectedPluginInTrack (int channelNum);
-    void userMovedAux (int channelNum, int auxNum, float newPosition);
+    void userMovedAux (int channelNum, int auxNum, AuxPosition ap, float newPosition);
     void userPressedAux (int channelNum, int auxNum);
     void userMovedQuickParam (float newLevel);
+    void userLaunchedClip (int channelNum, int clip);
+    void userStoppedClip (int channelNum);
+    void userLaunchedScene (int scene);
 
     void updateDeviceState();
 
@@ -148,6 +161,8 @@ public:
     Engine& engine;
 
 private:
+    std::shared_ptr<LaunchHandle> getLaunchHandle (int channelNum, int sceneNum);
+
     friend class Engine;
     ExternalControllerManager (Engine&);
 
