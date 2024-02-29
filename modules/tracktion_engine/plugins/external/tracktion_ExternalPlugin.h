@@ -137,6 +137,7 @@ private:
     int latencySamples = 0;
     double latencySeconds = 0;
     bool isInstancePrepared = false;
+    std::atomic<bool> isCreatingInstance = false;
 
     double lastSampleRate = 0.0;
     int lastBlockSizeSamples = 0;
@@ -159,7 +160,8 @@ private:
     juce::Array<ExternalAutomatableParameter*> autoParamForParamNumbers;
 
     //==============================================================================
-    juce::String createPluginInstance (const juce::PluginDescription&);
+    static bool requiresAsyncInstantiation (Engine&, const juce::PluginDescription&);
+    void createPluginInstance (const juce::PluginDescription&);
     void deletePluginInstance();
 
     //==============================================================================
@@ -168,6 +170,7 @@ private:
 
     //==============================================================================
     void doFullInitialisation();
+    void completePluginInitialisation();
     void buildParameterList();
     void refreshParameterValues();
     void updateDebugName();
